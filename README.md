@@ -5,8 +5,9 @@ incrementally builds a realistic **middle-end compiler pipeline** for
 matrix multiplication.
 
 The pipeline starts from low-level `scf.for` loops and progressively
-**detects, raises, lowers, tiles, re-raises, and fuses** computation using
-core MLIR dialects such as **SCF** and **Linalg**.
+**detects, raises, lowers, tiles, re-raises, fuses, and bufferizes**
+computation using core MLIR dialects such as **SCF**, **Linalg**, and
+**MemRef**.
 
 The goal of this repository is **not** to build a full end-to-end compiler,
 but to develop a deep understanding of **mid-level compiler
@@ -24,13 +25,14 @@ lives.
 04-loop-tiling/
 05-raise-tiled-scf-to-linalg/
 06-linalg-fusion/
+07-bufferization/
 README.md
 ```
 
 Each directory is a **self-contained exercise** containing:
 
 - Input MLIR
-- One or more in-tree MLIR C++ passes
+- One or more MLIR passes (custom C++ or standard MLIR pipelines)
 - Commands to run transformations via `mlir-opt`
 - Expected or representative output IR
 
@@ -40,8 +42,11 @@ Each directory is a **self-contained exercise** containing:
 
 ### 01 – Detect MatMul Loops
 Identify matmul-shaped loop nests expressed using `scf.for` through
-structural IR analysis.  
-This is a **pure analysis pass** and does not modify IR.
+structural IR analysis.
+
+This is a **pure analysis pass**:
+- No IR modification
+- Focused on recognizing high-level computation hidden in control flow
 
 ---
 
@@ -91,6 +96,23 @@ IR.
 
 ---
 
+### 07 – Bufferization & Memory Semantics
+Lower fused tensor-semantics Linalg IR into **explicit buffer-based
+representation** using MLIR’s one-shot bufferization pipeline.
+
+This exercise focuses on:
+- Converting tensors → memrefs
+- Making memory allocation and ownership explicit
+- Understanding `memref` layout, strides, and offsets
+- Introducing **address spaces** to model different memory regions
+  (e.g., global vs. on-chip memory)
+
+This stage represents the **semantic boundary between tensor algebra and
+hardware-visible memory**, which is critical for real accelerator
+backends.
+
+---
+
 ## Compiler Flow
 
 ```
@@ -111,6 +133,10 @@ Raise to Linalg MatMul
 Fuse Bias / Epilogue
   ↓
 Fused Linalg IR
+  ↓
+Bufferization
+  ↓
+Explicit MemRef-Based IR
 ```
 
 This flow closely mirrors real ML compiler pipelines used for
@@ -125,6 +151,7 @@ This flow closely mirrors real ML compiler pipelines used for
 - A realistic MLIR compiler learning path
 - Focused on **middle-end transformations**
 - Centered on SCF ↔ Linalg round-trips
+- Explicit about scheduling vs. semantics
 - Aligned with production compiler design patterns
 
 ### This repository **is not**:
@@ -132,22 +159,6 @@ This flow closely mirrors real ML compiler pipelines used for
 - A full end-to-end compiler
 - A frontend (no PyTorch / TensorFlow ingestion)
 - A backend (no LLVM IR or hardware-specific codegen)
-
----
-
-## Why Linalg Is the Final Output
-
-The final output of this repository is **fused Linalg IR**, and this is
-intentional.
-
-In real-world systems:
-
-- Linalg feeds vectorization passes
-- Then bufferization
-- Then target-specific lowering (LLVM, GPU, TPU dialects)
-
-This repository stops at the **correct abstraction boundary** for studying
-compiler middle-end behavior.
 
 ---
 
