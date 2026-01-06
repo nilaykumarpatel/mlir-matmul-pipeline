@@ -75,7 +75,6 @@ struct RaiseMatMulPattern : public OpRewritePattern<scf::ForOp> {
 
     rewriter.setInsertionPointToEnd(body);
 
-    // --- Correct way to get MemRefType ---
     Type memrefTy = storeOp.getMemref().getType();
     auto memrefType = llvm::dyn_cast<MemRefType>(memrefTy);
     if (!memrefType)
@@ -83,7 +82,6 @@ struct RaiseMatMulPattern : public OpRewritePattern<scf::ForOp> {
 
     Type elemType = memrefType.getElementType();
 
-    
     body->addArgument(elemType, outer.getLoc());
 
     // Create zero constant

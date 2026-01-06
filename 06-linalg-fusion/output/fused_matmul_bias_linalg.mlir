@@ -1,4 +1,3 @@
-Fusing matmul + bias at loc("../../mlir-compiler-experiments/06-linalg-fusion/input/matmul_with_bias.mlir":12:5)
 #map = affine_map<(d0, d1, d2) -> (d0, d2)>
 #map1 = affine_map<(d0, d1, d2) -> (d2, d1)>
 #map2 = affine_map<(d0, d1, d2) -> (d1)>
