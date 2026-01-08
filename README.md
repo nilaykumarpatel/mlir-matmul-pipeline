@@ -1,13 +1,13 @@
-# MLIR Compiler Experiments: From SCF Loops to Fused Linalg
+# MLIR Compiler Experiments: From SCF Loops to Vectorized Linalg
 
 This repository is a **hands-on MLIR compiler learning project** that
 incrementally builds a realistic **middle-end compiler pipeline** for
 matrix multiplication.
 
 The pipeline starts from low-level `scf.for` loops and progressively
-**detects, raises, lowers, tiles, re-raises, fuses, and bufferizes**
-computation using core MLIR dialects such as **SCF**, **Linalg**, and
-**MemRef**.
+**detects, raises, lowers, tiles, re-raises, fuses, bufferizes, and
+vectorizes** computation using core MLIR dialects such as **SCF**,
+**Linalg**, **MemRef**, **Affine**, and **Vector**.
 
 The goal of this repository is **not** to build a full end-to-end compiler,
 but to develop a deep understanding of **mid-level compiler
@@ -26,6 +26,7 @@ lives.
 05-raise-tiled-scf-to-linalg/
 06-linalg-fusion/
 07-bufferization/
+08-linalg-to-vector/
 README.md
 ```
 
@@ -113,6 +114,21 @@ backends.
 
 ---
 
+### 08 – Affine-Based Vectorization
+Lower bufferized Linalg IR into **explicit SIMD operations** using
+Affine-based vectorization.
+
+This exercise:
+- Converts Linalg ops to affine loop nests
+- Applies target-independent vectorization via the Vector dialect
+- Demonstrates outer-product style vectorization of matmul
+- Exposes how parallel dimensions are vectorized while reduction
+  dimensions remain scalar
+
+This is the **final middle-end stage** before backend-specific lowering.
+
+---
+
 ## Compiler Flow
 
 ```
@@ -137,17 +153,20 @@ Fused Linalg IR
 Bufferization
   ↓
 Explicit MemRef-Based IR
+  ↓
+Affine Loops
+  ↓
+Vector Dialect (SIMD)
 ```
 
 This flow closely mirrors real ML compiler pipelines used for
-**GPUs, TPUs, and custom AI accelerators**.
+**CPUs, GPUs, TPUs, and custom AI accelerators**.
 
 ---
 
 ## What This Repository Is (and Is Not)
 
 ### This repository **is**:
-
 - A realistic MLIR compiler learning path
 - Focused on **middle-end transformations**
 - Centered on SCF ↔ Linalg round-trips
@@ -155,7 +174,6 @@ This flow closely mirrors real ML compiler pipelines used for
 - Aligned with production compiler design patterns
 
 ### This repository **is not**:
-
 - A full end-to-end compiler
 - A frontend (no PyTorch / TensorFlow ingestion)
 - A backend (no LLVM IR or hardware-specific codegen)
