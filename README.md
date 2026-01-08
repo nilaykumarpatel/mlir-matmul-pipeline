@@ -165,6 +165,3 @@ This flow closely mirrors real ML compiler pipelines used for
 ## License
 
 Apache License 2.0
-
-This matches LLVM / MLIR licensing and allows safe reuse in both research
-and industry.
