@@ -38,13 +38,10 @@ struct AnnotateAddressSpacesPass
         continue;
       }
 
-      // Heuristic:
-      // addrspace 1 = all args except the last (inputs / weights)
-      // addrspace 2 = last arg (bias / output buffer)
-      unsigned addrSpace = (i < oldType.getNumInputs() - 1) ? 1 : 0;
-
-      auto storage = addrSpace == 1? mlir::IntegerAttr::get(mlir::IntegerType::get(&ctx, 32), 1)
-       : mlir::IntegerAttr::get(mlir::IntegerType::get(&ctx, 32), 2);
+      // addrspace 1 = inputs/weights, addrspace 2 = last arg (bias/output)
+      auto storage = mlir::IntegerAttr::get(
+          mlir::IntegerType::get(&ctx, 32),
+          (i < oldType.getNumInputs() - 1) ? 1 : 2);
       auto newType = MemRefType::get(
         memrefType.getShape(),
         memrefType.getElementType(),

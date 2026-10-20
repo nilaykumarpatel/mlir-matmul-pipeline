@@ -60,15 +60,6 @@ The pass is implemented in `pass/TileMatMulLoops.cpp` as an
 
 ---
 
-## Building
-
-From the repo root:
-
-```bash
-MLIR_PREFIX=/path/to/llvm-install ./build.sh
-```
-
----
 
 ## Running the Pass
 

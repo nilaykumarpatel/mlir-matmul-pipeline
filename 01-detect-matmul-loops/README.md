@@ -77,16 +77,6 @@ No IR rewriting or cloning is performed.
 
 ---
 
-## Building
-
-From the repo root:
-
-```bash
-MLIR_PREFIX=/path/to/llvm-install ./build.sh
-```
-
----
-
 ## Running the Pass
 
 > All commands below assume the **repo root** as the working directory.
@@ -140,7 +130,7 @@ This pass establishes the **entry point of the compiler pipeline**:
 
 - It recovers **semantic structure** from low-level IR
 - It enables later passes to operate conditionally on matmul-shaped code
-- It directly feeds:
+- It motivates the transformations in:
   - Exercise 02 (raising to `linalg.generic`)
   - Exercise 04 (loop tiling)
   - Exercise 05 (raising tiled loops back to Linalg)

@@ -6,7 +6,7 @@ MLIR’s standard bufferization infrastructure.
 
 Unlike earlier exercises, **no custom transformation logic is introduced for
 bufferization itself**. Instead, we intentionally rely on **existing MLIR
-passes**, exactly as production compilers do. A small **in-tree backend pass**
+passes**, exactly as production compilers do. A small **out-of-tree backend pass**
 is added only to *annotate memory intent* after bufferization.
 
 ---
@@ -30,7 +30,9 @@ explicit**, enabling true backend optimizations.
 
 ## Input IR
 
-**Tensor-semantic fused Linalg** (output of Exercise 06):
+**Tensor-semantic fused Linalg** (independently crafted tensor-domain
+equivalent of what Exercise 06 produces; Exercise 06 itself operates on
+memrefs):
 
 Key properties:
 - No `memref`
@@ -68,7 +70,7 @@ At this level:
 We apply MLIR’s standard bufferization pipeline:
 
 ```bash
-mlir-opt fused_linalg_tensor.mlir \
+"$MLIR_PREFIX/bin/mlir-opt" 07-bufferization/input/fused_linalg_tensor.mlir \
   --one-shot-bufferize="bufferize-function-boundaries=true" \
   --canonicalize \
   --cse
@@ -95,16 +97,6 @@ This pass:
 - Does **not** allocate new buffers
 - Preserves semantics
 - Expresses backend memory *intent* only
-
----
-
-## Building
-
-From the repo root:
-
-```bash
-MLIR_PREFIX=/path/to/llvm-install ./build.sh
-```
 
 ---
 
@@ -144,7 +136,7 @@ func.func @matmul_with_bias(
   %A    : memref<128x128xf32, ..., 1>,   // input
   %B    : memref<128x128xf32, ..., 1>,   // input
   %bias : memref<128xf32, ..., 2>        // constants
-) -> memref<128x128xf32, ..., 0>         // output
+) -> memref<128x128xf32>                 // output (allocated inside, no address space annotation)
 ```
 
 Address spaces express *where* data may live, but **do not decide physical

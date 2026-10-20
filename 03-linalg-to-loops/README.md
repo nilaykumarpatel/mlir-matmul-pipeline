@@ -29,8 +29,6 @@ to loops.
 
 ---
 
----
-
 ## Motivation
 
 `linalg.matmul` expresses computation at a **structured, declarative**
