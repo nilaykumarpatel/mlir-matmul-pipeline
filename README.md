@@ -1,18 +1,20 @@
 # MLIR Compiler Experiments: From SCF Loops to Vectorized Linalg
 
-This repository is a **hands-on MLIR compiler learning project** that
-incrementally builds a realistic **middle-end compiler pipeline** for
-matrix multiplication.
+This repository is a **hands-on MLIR compiler learning project** covering
+eight core **middle-end transformation techniques** for matrix multiplication.
 
-The pipeline starts from low-level `scf.for` loops and progressively
-**detects, raises, lowers, tiles, re-raises, fuses, bufferizes, and
-vectorizes** computation using core MLIR dialects such as **SCF**,
-**Linalg**, **MemRef**, **Affine**, and **Vector**.
+Each exercise is **mostly self-contained**: it has its own input MLIR and
+teaches one transformation in isolation. Most exercises use independently
+crafted inputs; the exception is Ex04→Ex05, which is a deliberate two-step
+sequence where Ex04's tiled output is the input to Ex05.
 
-The goal of this repository is **not** to build a full end-to-end compiler,
-but to develop a deep understanding of **mid-level compiler
-transformations**—the layer where most ML compiler complexity actually
-lives.
+Taken together they cover the full vocabulary of mid-level transformations:
+**detect, raise, lower, tile, re-raise, fuse, bufferize, and vectorize**,
+using core MLIR dialects: **SCF**, **Linalg**, **MemRef**, **Affine**, and
+**Vector**.
+
+The goal is a deep understanding of **mid-level compiler transformations** —
+the layer where most ML compiler complexity actually lives.
 
 ---
 
@@ -174,17 +176,13 @@ This stage encodes **scheduling decisions explicitly** in the IR.
 
 ---
 
-### 05 – Raise Tiled SCF to `linalg.matmul` *(stub — WIP)*
+### 05 – Raise Tiled SCF to `linalg.matmul`
 Recover high-level `linalg.matmul` semantics from **already tiled SCF
 loops**, while preserving the existing scheduling structure.
 
 This exercise demonstrates the separation of:
-- **Scheduling** (SCF)
-- **Computation semantics** (Linalg)
-
-> **Status:** The custom pass is a work in progress. It currently emits a
-> placeholder `linalg.generic`; the intended output (`linalg.matmul` inside
-> tile loops) is in `output/tiled_linalg_matmul.mlir`.
+- **Scheduling** (outer SCF tile loops — kept)
+- **Computation semantics** (inner point loops → `linalg.matmul`)
 
 ---
 
@@ -232,38 +230,39 @@ This is the **final middle-end stage** before backend-specific lowering.
 
 ---
 
-## Compiler Flow
+## Transformation Techniques
+
+The exercises cover two broad arcs. Each arc is self-contained; exercises
+within an arc share conceptual context but use independent inputs.
+
+**Arc 1 — SCF ↔ Linalg round-trip (exercises 01–05)**
 
 ```
-SCF Loops
-  ↓
-Detect MatMul Pattern
-  ↓
-Linalg Generic
-  ↓
-Lower to SCF
-  ↓
-Tile Loops
-  ↓
-Tiled SCF
-  ↓
-Raise to Linalg MatMul
-  ↓
-Fuse Bias / Epilogue
-  ↓
-Fused Linalg IR
-  ↓
-Bufferization
-  ↓
-Explicit MemRef-Based IR
-  ↓
-Affine Loops
-  ↓
-Vector Dialect (SIMD)
+SCF Loops (Clang-emitted, flat memref)
+  ↓  01  detect matmul-shaped loop nests       [analysis]
+  ↓  02  raise to linalg.generic               [structure]
+     ↕
+  ↓  03  lower linalg.matmul → SCF loops       [reverse direction, 2-D tensors]
+  ↓  04  tile the SCF loops                    [scheduling]
+  ↓  05  raise inner tile → linalg.matmul      [recover semantics post-tiling]
 ```
 
-This flow closely mirrors real ML compiler pipelines used for
-**CPUs, GPUs, TPUs, and custom AI accelerators**.
+> In a real compiler these steps compose: a linalg op is tiled at the
+> structured level (skipping 03–04), producing the same tiled-linalg IR
+> that 05 targets. Exercises 03 and 04 isolate those techniques for study.
+
+**Arc 2 — Structured Linalg to hardware (exercises 06–08)**
+
+```
+linalg.matmul  +  elementwise bias
+  ↓  06  fuse producer into matmul             [producer–consumer fusion]
+  ↓  07  bufferize tensors → memrefs           [memory semantics]
+  ↓  08  vectorize → Vector dialect (SIMD)     [target-independent codegen]
+```
+
+These two arcs together cover the full middle-end of a real ML compiler
+pipeline (CPUs, GPUs, TPUs, custom accelerators) — from frontend IR to
+the boundary of hardware-specific lowering.
 
 ---
 
