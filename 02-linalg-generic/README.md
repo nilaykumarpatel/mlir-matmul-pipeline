@@ -88,101 +88,33 @@ linalg.generic
 
 ---
 
-## Required MLIR Codebase Changes
+## Pass Implementation
 
-This is an **in-tree MLIR transformation pass**.
-
-### 1. Pass Definition (TableGen)
-
-**File**
-```
-mlir/include/mlir/Transforms/Passes.td
-```
-
-```tablegen
-def RaiseMatMulToLinalgGeneric
-    : Pass<"raise-matmul-to-linalg", "func::FuncOp"> {
-  let summary = "Raise matmul-shaped scf.for loops to linalg.generic";
-  let constructor =
-      "mlir::createRaiseMatMulToLinalgGenericPass()";
-}
-```
+The pass is implemented in `pass/RaiseMatMulToLinalg.cpp` as an
+**out-of-tree** MLIR pass, built against a prebuilt MLIR installation.
 
 ---
 
-### 2. Pass Declaration and Factory
+## Building
 
-**File**
-```
-mlir/include/mlir/Transforms/Passes.h
-```
-
-```cpp
-#define GEN_PASS_DECL_RAISEMATMULTOLINALGGENERIC
-#include "mlir/Transforms/Passes.h.inc"
-
-std::unique_ptr<Pass> createRaiseMatMulToLinalgGenericPass();
-```
-
----
-
-### 3. Build System Integration
-
-**File**
-```
-mlir/lib/Transforms/CMakeLists.txt
-```
-
-```cmake
-RaiseMatMulToLinalgGeneric.cpp
-```
-
----
-
-### 4. Pass Implementation
-
-**File**
-```
-mlir/lib/Transforms/RaiseMatMulToLinalgGeneric.cpp
-```
-
-The implementation performs:
-
-- Detection of matmul-shaped `scf.for` loop nests
-- Construction of a `linalg.generic` operation
-- Creation of iterator and indexing metadata
-- Region creation and `linalg.yield` insertion
-- Removal of the original SCF loop nest
-
----
-
-## Building MLIR
-
-From the LLVM project root:
+From the repo root:
 
 ```bash
-cmake -G Ninja \
-  -S llvm \
-  -B build-mlir \
-  -DLLVM_ENABLE_PROJECTS="mlir;clang" \
-  -DLLVM_TARGETS_TO_BUILD="X86"
-
-ninja -C build-mlir mlir-opt
-```
-
-If `Passes.td` was modified, regenerate headers:
-
-```bash
-ninja -C build-mlir mlir-headers
+MLIR_PREFIX=/path/to/llvm-install ./build.sh
 ```
 
 ---
 
 ## Running the Pass
 
+> All commands below assume the **repo root** as the working directory.
+
 ```bash
-mlir-opt input/matmul_loops.mlir \
-  --raise-matmul-to-linalg
+export LD_LIBRARY_PATH="$MLIR_PREFIX/lib:$LD_LIBRARY_PATH"
+
+./build/02-linalg-generic/raise-matmul-to-linalg \
+  --raise-matmul-to-linalg \
+  02-linalg-generic/input/matmul_clang.mlir
 ```
 
 ---
@@ -205,9 +137,12 @@ This pass represents the **first structural raising step** in the pipeline:
 
 - It converts implicit computation into structured Linalg IR
 - It enables subsequent structured transformations such as:
-  - lowering back to loops (Exercise 03)
   - loop tiling (Exercise 04)
+  - raising tiled loops back to Linalg (Exercise 05)
   - fusion and epilogue handling (Exercise 06)
+
+> **Note:** Exercise 03 uses an independent `linalg.matmul` input and does
+> not depend on the output of this pass.
 
 ---
 

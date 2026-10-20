@@ -2,19 +2,16 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/Pass/PassRegistry.h"
 
 using namespace mlir;
-
-namespace mlir {
-#define GEN_PASS_DEF_ADDRESSSPACEANNOTATE
-#include "mlir/Transforms/Passes.h.inc"
-}
 
 namespace {
 
 struct AnnotateAddressSpacesPass
     : public PassWrapper<AnnotateAddressSpacesPass,
                           OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(AnnotateAddressSpacesPass)
 
   StringRef getArgument() const final {
     return "annotate-address-spaces";
@@ -42,8 +39,8 @@ struct AnnotateAddressSpacesPass
       }
 
       // Heuristic:
-      // addrspace 1 = read-only (weights / bias)
-      // addrspace 0 = default (outputs)
+      // addrspace 1 = all args except the last (inputs / weights)
+      // addrspace 2 = last arg (bias / output buffer)
       unsigned addrSpace = (i < oldType.getNumInputs() - 1) ? 1 : 0;
 
       auto storage = addrSpace == 1? mlir::IntegerAttr::get(mlir::IntegerType::get(&ctx, 32), 1)
@@ -76,3 +73,7 @@ std::unique_ptr<Pass> createAddressSpaceAnnotatePass() {
   return std::make_unique<AnnotateAddressSpacesPass>();
 }
 } // namespace mlir
+
+void registerPasses() {
+  mlir::PassRegistration<AnnotateAddressSpacesPass>();
+}

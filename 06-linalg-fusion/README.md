@@ -48,7 +48,7 @@ optimization** before lowering to hardware-specific code.
 
 The input starts directly from **Linalg IR**.
 
-### `input/matmul_bias_linalg.mlir`
+### `input/matmul_with_bias.mlir`
 
 ```mlir
 module {
@@ -126,80 +126,18 @@ This eliminates the intermediate write/read of `%C`.
 
 ---
 
-## Required MLIR Codebase Changes
+## Pass Implementation
 
-This is an **in-tree MLIR transformation pass**.
+The custom fusion pass (`pass/FuseMatMulProducers.cpp`) is a
+**work in progress**. The expected output IR is in
+`output/fused_matmul_bias_linalg.mlir`.
 
-### 1. Pass Definition (TableGen)
-
-**File**
-```
-mlir/include/mlir/Transforms/Passes.td
-```
-
-```tablegen
-def FuseLinalgBias
-    : Pass<"fuse-linalg-bias", "func::FuncOp"> {
-  let summary = "Fuse bias addition into linalg.matmul";
-  let constructor = "mlir::createFuseLinalgBiasPass()";
-}
-```
-
----
-
-### 2. Pass Declaration and Factory
-
-**File**
-```
-mlir/include/mlir/Transforms/Passes.h
-```
-
-```cpp
-#define GEN_PASS_DECL_FUSELINALGBIAS
-#include "mlir/Transforms/Passes.h.inc"
-
-std::unique_ptr<Pass> createFuseLinalgBiasPass();
-```
-
----
-
-### 3. Build System Integration
-
-**File**
-```
-mlir/lib/Transforms/CMakeLists.txt
-```
-
-```cmake
-FuseBiasIntoLinalg.cpp
-```
-
----
-
-### 4. Pass Implementation
-
-**File**
-```
-mlir/lib/Transforms/FuseBiasIntoLinalg.cpp
-```
-
-Key MLIR APIs used:
-
-- `linalg::MatmulOp`
-- `linalg::GenericOp`
-- `AffineMap`
-- `linalg::YieldOp`
-
-This pass performs **no SCF manipulation**, **no tiling**, and **no
-legality checks beyond simple pattern validation**.
-
----
-
-## Running the Pass
+The equivalent transformation can be achieved today using standard MLIR passes
+(run from the **repo root**):
 
 ```bash
-mlir-opt matmul_bias_linalg.mlir \
-  --fuse-linalg-bias \
+"$MLIR_PREFIX/bin/mlir-opt" 06-linalg-fusion/input/matmul_with_bias.mlir \
+  --linalg-fuse-elementwise-ops \
   --canonicalize --cse
 ```
 

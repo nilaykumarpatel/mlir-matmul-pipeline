@@ -5,27 +5,33 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/Pass/Pass.h"
-#include "mlir/Transforms/Passes.h"
-
-#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
-
-//============================================================
-// 1. PASS DECLARATION (defines Options + Base)
-//============================================================  
-namespace mlir {
-#define GEN_PASS_DEF_TILEMATMULLOOPS
-#include "mlir/Transforms/Passes.h.inc"
-}
+#include "mlir/Pass/PassRegistry.h"
 
 using namespace mlir;
+
+static llvm::cl::opt<int64_t> clTileSize(
+    "tile-size",
+    llvm::cl::desc("Tile size for --tile-matmul-loops (default: 32)"),
+    llvm::cl::init(32));
+
 namespace {
 
 struct TileMatMulLoopsPass
-    : public impl::TileMatMulLoopsBase<TileMatMulLoopsPass> {
+    : public PassWrapper<TileMatMulLoopsPass, OperationPass<func::FuncOp>> {
+
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(TileMatMulLoopsPass)
+
+  int64_t tileSize;
+  explicit TileMatMulLoopsPass(int64_t ts = 32) : tileSize(ts) {}
+
+  StringRef getArgument() const final { return "tile-matmul-loops"; }
+  StringRef getDescription() const final {
+    return "Tile matmul-shaped scf.for loop nests";
+  }
 
   void runOnOperation() override {
     func::FuncOp func = getOperation();
-    int64_t ts = this->tileSize;
+    int64_t ts = tileSize;
 
     if (ts <= 0) {
       func.emitError() << "tile-size must be > 0";
@@ -111,6 +117,11 @@ struct TileMatMulLoopsPass
 //============================================================
 namespace mlir {
 std::unique_ptr<Pass> createTileMatMulLoopsPass() {
-  return std::make_unique<TileMatMulLoopsPass>();
+  return std::make_unique<TileMatMulLoopsPass>(clTileSize);
 }
+} // namespace mlir
+
+void registerPasses() {
+  mlir::PassRegistration<TileMatMulLoopsPass>(
+      []() { return mlir::createTileMatMulLoopsPass(); });
 }

@@ -1,19 +1,18 @@
 # 04 – Custom SCF MatMul Loop Tiling Pass (MLIR)
 
-This exercise adds a **custom in-tree MLIR pass** that tiles
+This exercise adds a **custom out-of-tree MLIR pass** that tiles
 matmul-shaped `scf.for` loop nests using a configurable tile size.
 
-The pass is implemented directly inside the MLIR codebase and is exposed
-via `mlir-opt` as:
+The pass is built against a prebuilt MLIR installation and is exposed as:
 
 ```
 --tile-matmul-loops
 ```
 
-with an option:
+with a global option:
 
 ```
---tile-matmul-loops="tile-size=<N>"
+--tile-size=<N>
 ```
 
 ---
@@ -54,115 +53,45 @@ where `T` is the tile size.
 
 ---
 
-## Required MLIR Source Changes
+## Pass Implementation
 
-Because this is an **in-tree pass**, the following MLIR files must be
-modified.
-
-### 1. Pass definition (TableGen)
-
-**File**
-```
-mlir/include/mlir/Transforms/Passes.td
-```
-
-```tablegen
-def TileMatMulLoops
-    : Pass<"tile-matmul-loops", "func::FuncOp"> {
-  let summary = "Tile matmul-shaped scf.for loop nests";
-
-  let options = [
-    Option<"tileSize", "tile-size", "int",
-           /*default=*/"32",
-           "Tile size for i/j/k loops">
-  ];
-
-  let constructor = "mlir::createTileMatMulLoopsPass()";
-}
-```
+The pass is implemented in `pass/TileMatMulLoops.cpp` as an
+**out-of-tree** MLIR pass, built against a prebuilt MLIR installation.
 
 ---
 
-### 2. Pass declaration and factory
+## Building
 
-**File**
-```
-mlir/include/mlir/Transforms/Passes.h
-```
-
-Add:
-
-```cpp
-#define GEN_PASS_DECL_TILEMATMULLOOPS
-#include "mlir/Transforms/Passes.h.inc"
-
-std::unique_ptr<Pass> createTileMatMulLoopsPass();
-```
-
----
-
-### 3. Build system integration
-
-**File**
-```
-mlir/lib/Transforms/CMakeLists.txt
-```
-
-Add:
-
-```cmake
-TileMatmulLoops.cpp
-```
-
----
-
-### 4. Pass implementation
-
-**File**
-```
-mlir/lib/Transforms/TileMatmulLoops.cpp
-```
-
-Contains:
-- SCF i–j–k loop detection
-- matmul pattern validation
-- tiled loop generation
-- SSA-safe cloning using `IRMapping`
-- removal of original loop nest
-- TableGen option (`tile-size`) support
-
----
-
-## Building MLIR
-
-From the LLVM project root:
+From the repo root:
 
 ```bash
-cmake -G Ninja   -S llvm   -B build-mlir   -DLLVM_ENABLE_PROJECTS="mlir;clang"   -DLLVM_TARGETS_TO_BUILD="X86"
-
-ninja -C build-mlir mlir-opt
-```
-
-If `Passes.td` was modified, regenerate headers:
-
-```bash
-ninja -C build-mlir mlir-headers
+MLIR_PREFIX=/path/to/llvm-install ./build.sh
 ```
 
 ---
 
 ## Running the Pass
 
+> All commands below assume the **repo root** as the working directory.
+
+```bash
+export LD_LIBRARY_PATH="$MLIR_PREFIX/lib:$LD_LIBRARY_PATH"
+```
+
 ### Default tile size (32)
 
 ```bash
-mlir-opt input/matmul_loops.mlir   --tile-matmul-loops   --canonicalize --cse
+./build/04-loop-tiling/tile-matmul-loops \
+  --tile-matmul-loops \
+  04-loop-tiling/input/matmul_loops.mlir
 ```
 
 ### Custom tile size
 
 ```bash
-mlir-opt input/matmul_loops.mlir   --tile-matmul-loops="tile-size=16"   --canonicalize --cse
+./build/04-loop-tiling/tile-matmul-loops \
+  --tile-matmul-loops --tile-size=16 \
+  04-loop-tiling/input/matmul_loops.mlir
 ```
 
 You should see the tile size reflected in the IR:

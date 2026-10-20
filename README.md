@@ -27,6 +27,9 @@ lives.
 06-linalg-fusion/
 07-bufferization/
 08-linalg-to-vector/
+tools/
+CMakeLists.txt
+build.sh
 README.md
 ```
 
@@ -36,6 +39,100 @@ Each directory is a **self-contained exercise** containing:
 - One or more MLIR passes (custom C++ or standard MLIR pipelines)
 - Commands to run transformations via `mlir-opt`
 - Expected or representative output IR
+
+---
+
+## Building
+
+### Prerequisites
+
+You need a prebuilt LLVM/MLIR installation (version 24+, tested on LLVM 24.0.0git) and CMake 3.20+.
+
+The LLVM install must provide:
+
+```
+<prefix>/bin/clang
+<prefix>/bin/clang++
+<prefix>/lib/cmake/mlir/MLIRConfig.cmake
+<prefix>/lib/cmake/llvm/LLVMConfig.cmake
+```
+
+Any standard LLVM release build or package install works. Set `MLIR_PREFIX` to that
+directory.
+
+### Build
+
+```bash
+MLIR_PREFIX=/path/to/llvm-install ./build.sh
+```
+
+On first run this configures and builds. Subsequent runs only rebuild changed files.
+
+### Clean
+
+```bash
+./build.sh clean
+```
+
+### Running a pass
+
+Set `LD_LIBRARY_PATH` so the binaries can find the MLIR shared libraries:
+
+```bash
+export LD_LIBRARY_PATH="$MLIR_PREFIX/lib:$LD_LIBRARY_PATH"
+```
+
+Each exercise builds a standalone tool. Run it with the pass flag and an input file:
+
+```bash
+# 01 – detect matmul loop nests (analysis only, IR unchanged)
+./build/01-detect-matmul-loops/detect-matmul-loops \
+  --detect-matmul-loops \
+  01-detect-matmul-loops/input/matmul_clang.mlir
+
+# 02 – raise SCF loops to linalg.generic
+./build/02-linalg-generic/raise-matmul-to-linalg \
+  --raise-matmul-to-linalg \
+  02-linalg-generic/input/matmul_clang.mlir
+
+# 04 – tile loop nests (default tile size: 32)
+./build/04-loop-tiling/tile-matmul-loops \
+  --tile-matmul-loops \
+  04-loop-tiling/input/matmul_loops.mlir
+
+# 05 – raise tiled SCF back to linalg.matmul
+./build/05-raise-tiled-scf-to-linalg/raise-tiled-scf-to-linalg \
+  --raise-tiled-scf-to-linalg \
+  05-raise-tiled-scf-to-linalg/input/tiled_matmul_scf.mlir
+
+# 07 – annotate memref arguments with address spaces
+./build/07-bufferization/annotate-address-spaces \
+  --annotate-address-spaces \
+  07-bufferization/input/fused_linalg_tensor.mlir
+```
+
+Redirect to `/dev/null` to suppress IR output and see only pass diagnostics:
+
+```bash
+./build/01-detect-matmul-loops/detect-matmul-loops \
+  --detect-matmul-loops \
+  01-detect-matmul-loops/input/matmul_clang.mlir \
+  -o /dev/null
+```
+
+Exercises 03, 06, and 08 use standard `mlir-opt` passes and do not have custom
+binaries. Use the `mlir-opt` from your MLIR installation directly:
+
+```bash
+# Example: exercises 03, 06, 08 — see each README for the exact pipeline
+"$MLIR_PREFIX/bin/mlir-opt" --help
+```
+
+### Out-of-tree build notes
+
+The passes are built **out-of-tree** against a prebuilt MLIR install.
+Do not run `cmake` directly from the repo root — in-source builds are blocked.
+Always use `build.sh`.
 
 ---
 
@@ -71,13 +168,13 @@ becomes executable control flow.
 
 ### 04 – Loop Tiling
 Apply cache/block tiling directly to `scf.for` loop nests using a custom
-in-tree MLIR transformation pass.
+out-of-tree MLIR transformation pass.
 
 This stage encodes **scheduling decisions explicitly** in the IR.
 
 ---
 
-### 05 – Raise Tiled SCF to `linalg.matmul`
+### 05 – Raise Tiled SCF to `linalg.matmul` *(stub — WIP)*
 Recover high-level `linalg.matmul` semantics from **already tiled SCF
 loops**, while preserving the existing scheduling structure.
 
@@ -85,21 +182,27 @@ This exercise demonstrates the separation of:
 - **Scheduling** (SCF)
 - **Computation semantics** (Linalg)
 
+> **Status:** The custom pass is a work in progress. It currently emits a
+> placeholder `linalg.generic`; the intended output (`linalg.matmul` inside
+> tile loops) is in `output/tiled_linalg_matmul.mlir`.
+
 ---
 
-### 06 – Linalg Fusion
+### 06 – Linalg Fusion *(custom pass is a stub — WIP)*
 Fuse a bias-add operation into `linalg.matmul` at the Linalg level,
 producing a single fused operation suitable for vectorization and backend
 lowering.
 
 This exercise focuses purely on **producer–consumer fusion** in structured
-IR.
+IR. The custom pass is a work in progress; the equivalent transformation
+can be run today with `--linalg-fuse-elementwise-ops` (see the exercise
+README).
 
 ---
 
 ### 07 – Bufferization & Memory Semantics
 Lower fused tensor-semantics Linalg IR into **explicit buffer-based
-representation** using MLIR’s one-shot bufferization pipeline.
+representation** using MLIR's one-shot bufferization pipeline.
 
 This exercise focuses on:
 - Converting tensors → memrefs

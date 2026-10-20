@@ -12,6 +12,7 @@ namespace {
 struct DetectMatMulLoopsPass
     : public PassWrapper<DetectMatMulLoopsPass,
                           OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(DetectMatMulLoopsPass)
 
   StringRef getArgument() const final { return "detect-matmul-loops"; }
   StringRef getDescription() const final {
@@ -89,3 +90,5 @@ struct DetectMatMulLoopsPass
 } // namespace
 
 static PassRegistration<DetectMatMulLoopsPass> pass;
+
+void registerPasses() {}

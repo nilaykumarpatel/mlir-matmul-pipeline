@@ -46,7 +46,7 @@ conditions are satisfied:
 2. Inside the innermost loop:
    - a floating-point multiply (`arith.mulf`)
    - a floating-point add (`arith.addf`)
-3. In the surrounding loop body:
+3. In the middle (j-loop) body:
    - a `memref.store` writing the reduction result
 
 If all conditions are met, the loop nest is reported as representing a
@@ -59,63 +59,10 @@ If all conditions are met, the loop nest is reported as representing a
 
 ---
 
-## Required MLIR Codebase Changes
+## Pass Implementation
 
-This is an **in-tree MLIR analysis pass**, but it introduces **no new IR
-transformations**.
-
-### 1. Pass Definition (TableGen)
-
-**File**
-```
-mlir/include/mlir/Transforms/Passes.td
-```
-
-```tablegen
-def DetectMatMulLoops
-    : Pass<"detect-matmul-loops", "func::FuncOp"> {
-  let summary = "Detect matmul-shaped scf.for loop nests";
-  let constructor = "mlir::createDetectMatMulLoopsPass()";
-}
-```
-
----
-
-### 2. Pass Declaration and Factory
-
-**File**
-```
-mlir/include/mlir/Transforms/Passes.h
-```
-
-```cpp
-#define GEN_PASS_DECL_DETECTMATMULLOOPS
-#include "mlir/Transforms/Passes.h.inc"
-
-std::unique_ptr<Pass> createDetectMatMulLoopsPass();
-```
-
----
-
-### 3. Build System Integration
-
-**File**
-```
-mlir/lib/Transforms/CMakeLists.txt
-```
-
-```cmake
-DetectMatMulLoops.cpp
-```
-
----
-
-### 4. Pass Implementation
-
-**File**
-```
-mlir/lib/Transforms/DetectMatMulLoops.cpp
-```
+The pass is implemented in `pass/DetectMatMulLoops.cpp` as an
+**out-of-tree** MLIR pass, built against a prebuilt MLIR installation.
 
 The implementation performs:
 
@@ -130,33 +77,35 @@ No IR rewriting or cloning is performed.
 
 ---
 
-## Building MLIR
+## Building
 
-From the LLVM project root:
-
-```bash
-cmake -G Ninja \
-  -S llvm \
-  -B build-mlir \
-  -DLLVM_ENABLE_PROJECTS="mlir;clang" \
-  -DLLVM_TARGETS_TO_BUILD="X86"
-
-ninja -C build-mlir mlir-opt
-```
-
-If `Passes.td` was modified, regenerate headers:
+From the repo root:
 
 ```bash
-ninja -C build-mlir mlir-headers
+MLIR_PREFIX=/path/to/llvm-install ./build.sh
 ```
 
 ---
 
 ## Running the Pass
 
+> All commands below assume the **repo root** as the working directory.
+
 ```bash
-mlir-opt input/matmul_loops.mlir \
-  --detect-matmul-loops
+export LD_LIBRARY_PATH="$MLIR_PREFIX/lib:$LD_LIBRARY_PATH"
+
+./build/01-detect-matmul-loops/detect-matmul-loops \
+  --detect-matmul-loops \
+  01-detect-matmul-loops/input/matmul_clang.mlir
+```
+
+To suppress IR output and see only diagnostics:
+
+```bash
+./build/01-detect-matmul-loops/detect-matmul-loops \
+  --detect-matmul-loops \
+  01-detect-matmul-loops/input/matmul_clang.mlir \
+  -o /dev/null
 ```
 
 ---
@@ -214,6 +163,6 @@ That recognition often happens at surprisingly low levels of IR.
 ## Status
 
 - ✅ Analysis-only
-- ✅ In-tree MLIR pass
+- ✅ Out-of-tree MLIR pass
 - ✅ No IR mutation
 - ✅ Foundation for all subsequent experiments

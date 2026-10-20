@@ -107,6 +107,7 @@ struct RaiseMatMulPattern : public OpRewritePattern<scf::ForOp> {
 struct RaiseMatMulToLinalgPass
     : public PassWrapper<RaiseMatMulToLinalgPass,
                           OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(RaiseMatMulToLinalgPass)
 
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<linalg::LinalgDialect>();
@@ -131,3 +132,5 @@ struct RaiseMatMulToLinalgPass
 } // namespace
 
 static PassRegistration<RaiseMatMulToLinalgPass> pass;
+
+void registerPasses() {}

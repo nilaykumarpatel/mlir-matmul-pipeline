@@ -33,12 +33,16 @@ design pattern in MLIR-based compilers.
 
 ## Goal
 
-Starting from tiled SCF loops, this pass:
+Starting from tiled SCF loops, this pass (when complete) will:
 
-- Detects matmul-shaped inner loop nests
-- Replaces scalar computation with `linalg.matmul`
-- Preserves outer tiling loops unchanged
-- Runs as a first-class, in-tree `mlir-opt` pass
+- Detect matmul-shaped inner loop nests
+- Replace scalar computation with `linalg.matmul`
+- Preserve outer tiling loops unchanged
+
+> **Status — WIP:** The current implementation is a stub. It applies the
+> same placeholder `linalg.generic` pattern as Exercise 02 and does **not**
+> yet emit `linalg.matmul`. The intended output IR is in
+> `output/tiled_linalg_matmul.mlir` for reference.
 
 ---
 
@@ -72,32 +76,45 @@ scf.for ii = 0 to N step TS {
 
 ---
 
-## Transformation Performed
+## Transformation Performed (Current Stub)
 
-The pass performs the following steps:
+The current implementation applies the same pattern as Exercise 02:
 
-1. **Tiled loop detection**
-   - Identifies outer tile loops (`ii`, `jj`, `kk`)
-   - Identifies inner computation loops (`i`, `j`, `k`)
+1. **Loop detection**
+   - Finds a two-level `outer → middle` SCF nest where `middle`'s body
+     contains a child `scf.for` (reduction) and a `memref.store`
 
-2. **Matmul pattern validation**
-   - Loads from A, B, and C
-   - Multiply–accumulate pattern (`mul` + `add`)
-   - Store back into C
+2. **Placeholder replacement**
+   - Replaces the matched outer loop with a 1-iterator `linalg.generic`
+     (parallel, identity map) — a structural placeholder, not a semantic
+     matmul
 
-3. **Semantic lifting**
-   - Removes the inner scalar loop nest
-   - Replaces it with a `linalg.matmul` operation
+3. **Cleanup**
+   - Erases the original loop nest
 
-4. **Scheduling preservation**
-   - Outer tile loops remain intact
-   - Only the computation body is replaced
+> The intended transformation (tiled-loop detection + `linalg.matmul`
+> emission with scheduling preservation) is not yet implemented.
 
 ---
 
 ## Resulting IR
 
-After transformation, the IR has the form:
+### Current (stub) output
+
+The pass currently emits a placeholder `linalg.generic`, identical in
+structure to Exercise 02's output:
+
+```mlir
+linalg.generic
+  { indexing_maps = [affine_map<(d0) -> (d0)>],
+    iterator_types = ["parallel"] }
+  outs(%C : memref<?xf32>) {
+^bb0(%out: f32):
+  linalg.yield %zero : f32
+}
+```
+
+### Intended output (in `output/tiled_linalg_matmul.mlir`)
 
 ```mlir
 scf.for ii = 0 to 128 step 32 {
@@ -111,106 +128,53 @@ scf.for ii = 0 to 128 step 32 {
 }
 ```
 
-**Key property:**
+**Key property of the intended output:**
 - Scheduling is expressed in `scf.for`
 - Computation semantics are expressed in Linalg
 
 ---
 
-## Required MLIR Codebase Changes
+## Pass Implementation
 
-This is an **in-tree MLIR transformation pass** and requires coordinated
-changes across the MLIR codebase.
-
-### 1. Pass Declarations
-
-**File**
-```
-mlir/include/mlir/Transforms/Passes.h
-```
-
-```cpp
-#define GEN_PASS_DECL_TILEMATMULLOOPS
-#define GEN_PASS_DECL_RAISEMATMULTOLINALG
-#include "mlir/Transforms/Passes.h.inc"
-
-std::unique_ptr<Pass> createTileMatMulLoopsPass();
-std::unique_ptr<Pass> createRaiseMatMulToLinalgPass();
-```
+The pass is implemented in `pass/RaiseMatMulToLinalg.cpp` as an
+**out-of-tree** MLIR pass, built against a prebuilt MLIR installation.
 
 ---
 
-### 2. Pass Definitions (TableGen)
+## Building
 
-**File**
-```
-mlir/include/mlir/Transforms/Passes.td
-```
-
-```tablegen
-def TileMatMulLoops
-    : Pass<"tile-matmul-loops", "func::FuncOp"> {
-  let summary = "Tile matmul-shaped scf.for loop nests";
-  let options = [
-    Option<"tileSize", "tile-size", "int", "32",
-           "Tile size for i/j/k loops">
-  ];
-  let constructor = "mlir::createTileMatMulLoopsPass()";
-}
-
-def RaiseMatMulToLinalg
-    : Pass<"raise-matmul-to-linalg", "func::FuncOp"> {
-  let summary = "Raise tiled SCF matmul loops to linalg.matmul";
-  let constructor = "mlir::createRaiseMatMulToLinalgPass()";
-}
-```
-
----
-
-### 3. Build System Integration
-
-**File**
-```
-mlir/lib/Transforms/CMakeLists.txt
-```
-
-```cmake
-RaiseTiledMatMulToLinalg.cpp
-```
-
----
-
-### 4. Rebuild MLIR
+From the repo root:
 
 ```bash
-ninja -C build-mlir mlir-opt
+MLIR_PREFIX=/path/to/llvm-install ./build.sh
 ```
 
 ---
 
 ## Running the Pass
 
+> All commands below assume the **repo root** as the working directory.
+
+```bash
+export LD_LIBRARY_PATH="$MLIR_PREFIX/lib:$LD_LIBRARY_PATH"
+```
+
 ### Full Pipeline (Exercise 04 → Exercise 05)
 
 ```bash
-mlir-opt matmul_loops.mlir \
+./build/04-loop-tiling/tile-matmul-loops \
   --tile-matmul-loops \
-  --raise-matmul-to-linalg \
-  --canonicalize \
-  --cse \
-  > output.mlir
+  04-loop-tiling/input/matmul_loops.mlir | \
+./build/05-raise-tiled-scf-to-linalg/raise-tiled-scf-to-linalg \
+  --raise-tiled-scf-to-linalg
 ```
-
----
 
 ### Run Only Exercise 05 (Already Tiled Input)
 
 ```bash
-mlir-opt input/tiled_matmul_scf.mlir \
-  --raise-matmul-to-linalg \
-  --canonicalize \
-  --cse \
-  > output/linalg_matmul.mlir
+./build/05-raise-tiled-scf-to-linalg/raise-tiled-scf-to-linalg \
+  --raise-tiled-scf-to-linalg \
+  05-raise-tiled-scf-to-linalg/input/tiled_matmul_scf.mlir
 ```
 
 ---

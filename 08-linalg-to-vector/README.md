@@ -72,8 +72,17 @@ is available and stable in current MLIR.
 
 ### Command
 
+This exercise uses standard `mlir-opt` passes — no custom binary needed.
+
+> All commands below assume the **repo root** as the working directory.
+
 ```bash
-mlir-opt   input/bufferized_linalg.mlir   --convert-linalg-to-affine-loops   --affine-super-vectorize="virtual-vector-size=32 vectorize-reductions"   --canonicalize   --cse   > output/vectorized.mlir
+"$MLIR_PREFIX/bin/mlir-opt" 08-linalg-to-vector/input/bufferized_linalg.mlir \
+  --convert-linalg-to-affine-loops \
+  --affine-super-vectorize="virtual-vector-size=32 vectorize-reductions" \
+  --canonicalize \
+  --cse \
+  > 08-linalg-to-vector/output/vectorized.mlir
 ```
 
 ---

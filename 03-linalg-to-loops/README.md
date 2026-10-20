@@ -94,31 +94,19 @@ transformations are needed.
 
 ---
 
-## Building MLIR
+## Running
 
-From the LLVM project root:
+This exercise uses standard `mlir-opt` passes — no custom binary needed.
 
-```bash
-cmake -G Ninja \
-  -S llvm \
-  -B build-mlir \
-  -DLLVM_ENABLE_PROJECTS="mlir;clang" \
-  -DLLVM_TARGETS_TO_BUILD="X86"
-
-ninja -C build-mlir mlir-opt
-```
-
----
-
-## Command to Generate Output IR
+> All commands below assume the **repo root** as the working directory.
 
 ```bash
-mlir-opt input/matmul_tile_32.mlir \
+"$MLIR_PREFIX/bin/mlir-opt" 03-linalg-to-loops/input/matmul_tile_32.mlir \
   --one-shot-bufferize \
   --convert-linalg-to-loops \
   --canonicalize \
   --cse \
-  > output/output.mlir
+  > 03-linalg-to-loops/output/output.mlir
 ```
 
 ---

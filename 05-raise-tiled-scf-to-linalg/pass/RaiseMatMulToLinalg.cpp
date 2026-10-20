@@ -109,15 +109,16 @@ struct RaiseMatMulPattern : public OpRewritePattern<scf::ForOp> {
 struct RaiseMatMulToLinalgPass
     : public PassWrapper<RaiseMatMulToLinalgPass,
                           OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(RaiseMatMulToLinalgPass)
 
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<linalg::LinalgDialect>();
   }
 
-  StringRef getArgument() const final { return "raise-matmul-to-linalg"; }
+  StringRef getArgument() const final { return "raise-tiled-scf-to-linalg"; }
 
   StringRef getDescription() const final {
-    return "Raise matmul-like scf.for loop nests to linalg.generic";
+    return "Raise tiled SCF matmul loop nests to linalg.matmul";
   }
 
   void runOnOperation() override {
@@ -133,3 +134,5 @@ struct RaiseMatMulToLinalgPass
 } // namespace
 
 static PassRegistration<RaiseMatMulToLinalgPass> pass;
+
+void registerPasses() {}

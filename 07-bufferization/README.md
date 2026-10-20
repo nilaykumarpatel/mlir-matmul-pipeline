@@ -84,10 +84,11 @@ No MLIR source changes are required for this step.
 
 ---
 
-### Step 2 – Backend Address-Space Annotation (Custom In-Tree Pass)
+### Step 2 – Backend Address-Space Annotation (Custom Out-of-Tree Pass)
 
-After bufferization, a **custom backend pass** is run to annotate buffers with
-**address spaces**, modeling different memory regions (e.g. weights vs outputs).
+After bufferization, a **custom out-of-tree pass** (`pass/AddressSpaceAnnotate.cpp`)
+annotates buffers with **address spaces**, modeling different memory regions
+(e.g. weights vs outputs).
 
 This pass:
 - Does **not** change computation
@@ -97,87 +98,39 @@ This pass:
 
 ---
 
-## Required MLIR In-Tree Changes
+## Building
 
-To make the backend pass available via `mlir-opt`, the following **in-tree MLIR
-changes** are required.
-
-### 1. Pass Declaration (`Passes.h`)
-
-**File**
-```
-mlir/include/mlir/Transforms/Passes.h
-```
-
-Add:
-
-```cpp
-#define GEN_PASS_DECL_ANNOTATEADDRESSSPACES
-#include "mlir/Transforms/Passes.h.inc"
-
-std::unique_ptr<Pass> createAnnotateAddressSpacesPass();
-```
-
----
-
-### 2. Pass Definition (`Passes.td`)
-
-**File**
-```
-mlir/include/mlir/Transforms/Passes.td
-```
-
-Add:
-
-```tablegen
-def AnnotateAddressSpaces
-    : Pass<"annotate-address-spaces", "func::FuncOp"> {
-  let summary = "Annotate bufferized memrefs with backend address spaces";
-  let constructor = "mlir::createAnnotateAddressSpacesPass()";
-}
-```
-
----
-
-### 3. Pass Implementation
-
-**File**
-```
-mlir/lib/Transforms/AnnotateAddressSpaces.cpp
-```
-
-> **Note**  
-> In this repository, the pass is implemented *in-tree* and placed under
-> `mlir/lib/Transforms/` to mirror how backend-oriented transformation passes
-> are structured in the upstream MLIR codebase.
-
-Responsibilities:
-- Rewrite `func.func` argument types to include address spaces
-- Update entry block arguments to match function signature
-- Preserve all IR invariants
-- Operate **only after bufferization**
-
----
-
-### 4. Build System Integration
-
-**File**
-```
-mlir/lib/Transforms/CMakeLists.txt
-```
-
-Add:
-
-```cmake
-AnnotateAddressSpaces.cpp
-```
-
----
-
-### 5. Rebuild MLIR
+From the repo root:
 
 ```bash
-ninja mlir-opt
+MLIR_PREFIX=/path/to/llvm-install ./build.sh
+```
+
+---
+
+## Running
+
+> All commands below assume the **repo root** as the working directory.
+
+```bash
+export LD_LIBRARY_PATH="$MLIR_PREFIX/lib:$LD_LIBRARY_PATH"
+```
+
+### Step 1 – Bufferization (standard mlir-opt)
+
+```bash
+"$MLIR_PREFIX/bin/mlir-opt" 07-bufferization/input/fused_linalg_tensor.mlir \
+  --one-shot-bufferize="bufferize-function-boundaries=true" \
+  --canonicalize --cse \
+  > /tmp/bufferized.mlir
+```
+
+### Step 2 – Address-space annotation (custom pass)
+
+```bash
+./build/07-bufferization/annotate-address-spaces \
+  --annotate-address-spaces \
+  /tmp/bufferized.mlir
 ```
 
 ---
