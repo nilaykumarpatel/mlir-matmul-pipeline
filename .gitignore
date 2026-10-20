@@ -22,3 +22,6 @@ compile_commands.json
 04-loop-tiling/tile-matmul-loops
 05-raise-tiled-scf-to-linalg/raise-tiled-scf-to-linalg
 07-bufferization/annotate-address-spaces
+
+
+.continue-here.md

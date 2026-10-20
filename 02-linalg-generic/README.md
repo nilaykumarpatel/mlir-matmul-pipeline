@@ -1,113 +1,110 @@
 # 02 – Raising SCF MatMul to `linalg.generic`
 
-This experiment demonstrates how a matmul-shaped `scf.for` loop nest
-can be lifted into a **structured Linalg operation** using
-`linalg.generic`.
-
-The goal is not full numerical correctness or canonical `linalg.matmul`,
-but **structural elevation** of computation into MLIR’s structured IR
-layer.
-
----
-
-## Motivation
-
-SCF loop nests encode control flow explicitly but hide higher-level
-computation semantics. For optimizations such as tiling, fusion, and
-vectorization, compilers benefit from a representation that:
-
-- exposes iteration space explicitly
-- separates *what* is computed from *how* it is looped
-- is target-agnostic
-
-The `linalg.generic` operation provides this abstraction and serves as
-the primary structured IR for many MLIR optimization pipelines.
+This exercise lifts a Clang-emitted, flat-memory matmul loop nest into
+a structured `linalg.generic` operation with correct iteration semantics.
 
 ---
 
 ## Input IR
 
-The input to this pass is SCF-based matmul code with:
-
-- an outer loop over rows (`i`)
-- a middle loop over columns (`j`)
-- an inner reduction loop (`k`)
-- scalar `load`, `mul`, `add`, and `store` operations
-
-Such IR is typically produced by Clang or early frontend lowering
-pipelines.
-
----
-
-## Transformation Performed
-
-The pass performs the following steps:
-
-1. **Pattern matching**
-   - Identifies a three-level nested `scf.for` loop structure
-   - Locates the reduction loop and the final `memref.store`
-
-2. **Structural lifting**
-   - Replaces the entire loop nest with a single `linalg.generic`
-     operation
-   - Preserves the output buffer (`C`) as an `outs` operand
-
-3. **Explicit iteration semantics**
-   - Introduces placeholder parallel iterator semantics
-   - Uses simple identity indexing maps
-
-4. **Region construction**
-   - Builds a region containing a single block
-   - Introduces block arguments corresponding to the output element
-   - Yields a zero-initialized value matching the output element type
-
-5. **Cleanup**
-   - Erases the original SCF loop nest after replacement
-
----
-
-## Resulting IR
-
-The resulting IR contains:
-
-- a `linalg.generic` operation
-- explicit iterator and indexing metadata
-- a region terminated by `linalg.yield`
-
-Representative shape:
+Clang lowers a C matmul to three nested `scf.for` loops over **1-D flat
+memrefs**, with matrix dimensions passed as separate `i32` arguments and
+flat indices computed by hand:
 
 ```mlir
-linalg.generic
-  { indexing_maps = [affine_map<(d0) -> (d0)>],
-    iterator_types = ["parallel"] }
-  outs(%C : memref<?xf32>) {
-^bb0(%out: f32):
-  linalg.yield %zero : f32
+func.func @matmul(%A: memref<?xf32>, %B: memref<?xf32>, %C: memref<?xf32>,
+                  %M: i32, %N: i32, %K: i32) {
+  scf.for %i = %c0 to %M_idx step %c1 {          // parallel (rows)
+    scf.for %j = %c0 to %N_idx step %c1 {        // parallel (cols)
+      %sum = scf.for %k = %c0 to %K_idx          // reduction
+               iter_args(%acc = %init) -> (f32) {
+        %a = memref.load %A[%i*K + %k]
+        %b = memref.load %B[%k*N + %j]
+        scf.yield %acc + %a * %b
+      }
+      memref.store %sum, %C[%i*N + %j]
+    }
+  }
 }
 ```
 
 ---
 
-## Pass Implementation
+## The Flat-Memref Problem
 
-The pass is implemented in `pass/RaiseMatMulToLinalg.cpp` as an
-**out-of-tree** MLIR pass, built against a prebuilt MLIR installation.
+`linalg.generic` expresses how loop induction variables index each operand
+via **compile-time affine maps** — expressions like `(i,j,k) → (i,k)`.
+Those maps require strides to be statically known.
+
+The input has strides `K` and `N`, which are **runtime values**. There is
+no way to encode `i*K + k` as a static affine expression.
+
+**Solution:** reshape each 1-D flat memref to 2-D with
+`memref.expand_shape`, using the loop upper bounds as dynamic sizes.
+After reshaping, the element at logical position `(i, k)` is accessed as
+`A2d[i, k]` — expressible as the affine map `(d0, d1, d2) → (d0, d2)`.
 
 ---
 
-## Building
+## Transformation
 
-From the repo root:
+```
+%A2d = memref.expand_shape %A [[0,1]] output_shape [M, K]  : memref<?xf32> → memref<?x?xf32>
+%B2d = memref.expand_shape %B [[0,1]] output_shape [K, N]  : memref<?xf32> → memref<?x?xf32>
+%C2d = memref.expand_shape %C [[0,1]] output_shape [M, N]  : memref<?xf32> → memref<?x?xf32>
 
-```bash
-MLIR_PREFIX=/path/to/llvm-install ./build.sh
+linalg.generic {
+  indexing_maps = [
+    (i,j,k) → (i,k),   // A: read row i, col k
+    (i,j,k) → (k,j),   // B: read row k, col j
+    (i,j,k) → (i,j)    // C: read+write row i, col j
+  ],
+  iterator_types = ["parallel", "parallel", "reduction"]
+} ins(%A2d, %B2d) outs(%C2d) {
+^bb0(%a, %b, %c):
+  linalg.yield %c + %a * %b
+}
+```
+
+The entire SCF loop nest is erased; the three `expand_shape` ops and the
+`linalg.generic` replace it.
+
+---
+
+## Resulting IR
+
+```mlir
+#map  = affine_map<(d0, d1, d2) -> (d0, d2)>
+#map1 = affine_map<(d0, d1, d2) -> (d2, d1)>
+#map2 = affine_map<(d0, d1, d2) -> (d0, d1)>
+module {
+  func.func @matmul(%arg0: memref<?xf32>, %arg1: memref<?xf32>, %arg2: memref<?xf32>,
+                    %arg3: i32, %arg4: i32, %arg5: i32) {
+    %0 = arith.index_cast %arg3 : i32 to index
+    %1 = arith.index_cast %arg4 : i32 to index
+    %2 = arith.index_cast %arg5 : i32 to index
+    %expand_shape   = memref.expand_shape %arg0 [[0, 1]] output_shape [%0, %2] : memref<?xf32> into memref<?x?xf32>
+    %expand_shape_0 = memref.expand_shape %arg1 [[0, 1]] output_shape [%2, %1] : memref<?xf32> into memref<?x?xf32>
+    %expand_shape_1 = memref.expand_shape %arg2 [[0, 1]] output_shape [%0, %1] : memref<?xf32> into memref<?x?xf32>
+    linalg.generic {indexing_maps = [#map, #map1, #map2],
+                    iterator_types = ["parallel", "parallel", "reduction"]}
+      ins(%expand_shape, %expand_shape_0 : memref<?x?xf32>, memref<?x?xf32>)
+      outs(%expand_shape_1 : memref<?x?xf32>) {
+    ^bb0(%in: f32, %in_2: f32, %out: f32):
+      %3 = arith.mulf %in, %in_2 : f32
+      %4 = arith.addf %out, %3 : f32
+      linalg.yield %4 : f32
+    }
+    return
+  }
+}
 ```
 
 ---
 
 ## Running the Pass
 
-> All commands below assume the **repo root** as the working directory.
+> Run from the **repo root**.
 
 ```bash
 export LD_LIBRARY_PATH="$MLIR_PREFIX/lib:$LD_LIBRARY_PATH"
@@ -119,39 +116,25 @@ export LD_LIBRARY_PATH="$MLIR_PREFIX/lib:$LD_LIBRARY_PATH"
 
 ---
 
-## Assumptions and Non-Goals
+## What to Notice
 
-- Assumes a canonical three-level SCF matmul loop nest
-- Does not construct a canonical `linalg.matmul`
-- Does not validate affine indexing correctness
-- Uses simplified iterator semantics for clarity
-
-These constraints keep the transformation focused on **structural raising**
-rather than numerical optimization.
-
----
-
-## Role in the Overall Pipeline
-
-This pass represents the **first structural raising step** in the pipeline:
-
-- It converts implicit computation into structured Linalg IR
-- It enables subsequent structured transformations such as:
-  - loop tiling (Exercise 04)
-  - raising tiled loops back to Linalg (Exercise 05)
-  - fusion and epilogue handling (Exercise 06)
-
-> **Note:** Exercise 03 uses an independent `linalg.matmul` input and does
-> not depend on the output of this pass.
+- **Three iterators, not one.** The iteration space is `(i, j, k)` —
+  parallel over rows and columns, reduction over the inner dimension.
+- **All three operands are wired.** A and B appear as `ins`; C appears
+  as `outs` (read before write, updated in place).
+- **The body is minimal.** `%c + %a * %b` — accumulate one product.
+  The loop is gone; the iteration is implicit in the `linalg.generic`.
+- **Reshape is load-free.** `expand_shape` is a view: no data is copied.
 
 ---
 
-## Why This Exercise Matters
+## Role in the Pipeline
 
-This experiment demonstrates a key MLIR principle:
+| Exercise | Direction | Input | Output |
+|---|---|---|---|
+| **02 (this)** | raise | SCF loops (1-D flat) | `linalg.generic` |
+| 03 | lower | `linalg.matmul` | SCF loops (2-D) |
+| 04 | tile | SCF loops (2-D) | tiled SCF |
+| 05 | raise | tiled SCF (2-D) | `linalg.matmul` in tile loops |
 
-> **Raising computation into structured IR enables more powerful and
-> composable optimizations than operating directly on raw loops.**
-
-It establishes the bridge between low-level SCF control flow and
-high-level tensor algebra.
+> Exercise 03 uses an independent input and does not depend on this pass's output.
