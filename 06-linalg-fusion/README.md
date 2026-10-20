@@ -1,190 +1,96 @@
-# 06 – Linalg Fusion: MatMul + Bias
+# 06 – Linalg Producer Fusion
 
-This experiment focuses on **producer–consumer fusion** at the Linalg
-level by fusing a bias-add operation into a preceding `linalg.matmul`.
-
-Unlike earlier exercises, this stage intentionally **starts from
-Linalg-level IR**, avoiding SCF and tiling complexity so the focus
-remains purely on **fusion logic**.
+This exercise fuses a `linalg.matmul` and a parallel epilogue
+(`linalg.generic` bias-add) into a single `linalg.generic`, eliminating
+the intermediate write-read of the output buffer between the two ops.
 
 ---
 
-## Goal
-
-Build a clean, incremental MLIR exercise centered on **Linalg fusion**.
-
-By the end of this exercise, you will:
-
-- Start from **Linalg-level IR** (not SCF)
-- Fuse **bias addition** into the matmul computation
-- Keep `linalg.matmul` intact when possible
-- Establish a foundation for fusing **activations (e.g., ReLU)** next
-
-This exercise intentionally does **not** reuse the passes from
-Exercises 04 and 05. It begins from a known-good IR to isolate and
-simplify fusion reasoning.
-
----
-
-## Motivation
-
-At the Linalg level, operations are:
-
-- semantic and declarative
-- explicitly structured
-- well-suited for pattern-based transformations
-
-Fusion at this level reduces:
-- intermediate memory traffic
-- unnecessary writes and reads
-- kernel launch overheads
-
-This mirrors how real MLIR-based compilers perform **middle-end
-optimization** before lowering to hardware-specific code.
-
----
-
-## Input IR (Starting Point)
-
-The input starts directly from **Linalg IR**.
-
-### `input/matmul_with_bias.mlir`
+## Input IR
 
 ```mlir
-module {
-  func.func @matmul_with_bias(
-      %A : memref<128x128xf32>,
-      %B : memref<128x128xf32>,
-      %bias : memref<128xf32>,
-      %C : memref<128x128xf32>) {
+func.func @matmul_with_bias(%A, %B, %bias, %C) {
+  linalg.matmul ins(%A, %B : memref<128x128xf32>, memref<128x128xf32>)
+                outs(%C : memref<128x128xf32>)
 
-    linalg.matmul
-      ins(%A, %B : memref<128x128xf32>, memref<128x128xf32>)
-      outs(%C : memref<128x128xf32>)
-
-    linalg.generic
-      indexing_maps = [
-        affine_map<(i,j) -> (j)>,
-        affine_map<(i,j) -> (i,j)>
-      ],
-      iterator_types = ["parallel", "parallel"]
-      ins(%bias : memref<128xf32>)
-      outs(%C : memref<128x128xf32>) {
-    ^bb0(%b : f32, %c : f32):
-      %sum = arith.addf %c, %b : f32
-      linalg.yield %sum : f32
-    }
-
-    return
+  linalg.generic {
+    indexing_maps = [affine_map<(i,j) -> (j)>, affine_map<(i,j) -> (i,j)>],
+    iterator_types = ["parallel", "parallel"]
+  } ins(%bias : memref<128xf32>) outs(%C : memref<128x128xf32>) {
+  ^bb0(%b: f32, %c: f32):
+    %sum = arith.addf %c, %b : f32
+    linalg.yield %sum : f32
   }
 }
 ```
 
-This represents the computation:
-
-```
-C = A * B
-C = C + bias
-```
+The matmul writes `C`, then the epilogue reads-and-updates `C`. Both ops
+share the same output buffer — the classic producer-consumer fusion target.
 
 ---
 
-## Fusion Strategy (High Level)
+## Transformation
 
-The fusion pass applies the following strategy:
+The pass expands the epilogue's 2-iterator space `(i, j)` to match the
+matmul's 3-iterator space `(i, j, k)`, then inlines both bodies:
 
-1. **Pattern match**
-   - A `linalg.matmul` writing to `%C`
-   - Immediately followed by a `linalg.generic` consuming `%C`
-
-2. **Verification**
-   - The `linalg.generic` performs elementwise addition only
-   - `%C` has no other users between the two ops
-
-3. **Fusion**
-   - Replace both ops with a single `linalg.generic`
-   - Iterators: `[parallel, parallel, reduction]`
-   - Inputs: `%A`, `%B`, `%bias`
-   - Output: `%C`
-
-4. **Cleanup**
-   - Erase the original `linalg.matmul`
-   - Erase the original bias `linalg.generic`
+1. **Collect matmul operands:** A(i,k), B(k,j), C(i,j)
+2. **Expand epilogue input maps from 2D → 3D:** `(i,j)->(j)` becomes `(i,j,k)->(j)` — the expression is unchanged, the map just has an extra unused dimension
+3. **Build fused generic** with iterator types `[parallel, parallel, reduction]`
+4. **Fused body:** matmul step (`C += A*B`) feeds into the epilogue body via `IRMapping` — any elementwise epilogue is handled, not just bias
 
 ---
 
 ## Resulting IR
 
-After fusion, the IR contains a **single `linalg.generic`** expressing
-the full computation:
-
-- matrix multiplication
-- bias addition
-- combined in one region
-
-This eliminates the intermediate write/read of `%C`.
-
----
-
-## Pass Implementation
-
-The custom fusion pass (`pass/FuseMatMulProducers.cpp`) is a
-**work in progress**. The expected output IR is in
-`output/fused_matmul_bias_linalg.mlir`.
-
-The equivalent transformation can be achieved today using standard MLIR passes
-(run from the **repo root**):
-
-```bash
-"$MLIR_PREFIX/bin/mlir-opt" 06-linalg-fusion/input/matmul_with_bias.mlir \
-  --linalg-fuse-elementwise-ops \
-  --canonicalize --cse
+```mlir
+#map  = affine_map<(d0, d1, d2) -> (d0, d2)>
+#map1 = affine_map<(d0, d1, d2) -> (d2, d1)>
+#map2 = affine_map<(d0, d1, d2) -> (d1)>
+#map3 = affine_map<(d0, d1, d2) -> (d0, d1)>
+module {
+  func.func @matmul_with_bias(%arg0: memref<128x128xf32>, %arg1: memref<128x128xf32>,
+                               %arg2: memref<128xf32>, %arg3: memref<128x128xf32>) {
+    linalg.generic {indexing_maps = [#map, #map1, #map2, #map3],
+                    iterator_types = ["parallel", "parallel", "reduction"]}
+      ins(%arg0, %arg1, %arg2 : memref<128x128xf32>, memref<128x128xf32>, memref<128xf32>)
+      outs(%arg3 : memref<128x128xf32>) {
+    ^bb0(%in: f32, %in_0: f32, %in_1: f32, %out: f32):
+      %0 = arith.mulf %in, %in_0 : f32
+      %1 = arith.addf %out, %0 : f32
+      %2 = arith.addf %1, %in_1 : f32
+      linalg.yield %2 : f32
+    }
+    return
+  }
+}
 ```
 
-The expected output is a single fused `linalg.generic`.
+**What to notice:**
+- Two ops → one. The intermediate buffer write/read is eliminated.
+- The bias map `(d1)` broadcasts over both `d0` (rows) and `d2` (reduction) — it is read once per `(i,j,k)` step.
+- The fused body runs `C += A*B + bias` at every k-step. This is the standard structural result of elementwise fusion into a reduction op.
 
 ---
 
-## Assumptions and Non-Goals
+## Running the Pass
 
-- Assumes matmul followed immediately by bias addition
-- Assumes elementwise bias broadcast
-- Does not perform tiling or vectorization
-- Does not lower to loops or target-specific code
+> Run from the **repo root**.
 
-These constraints keep the focus squarely on **fusion mechanics**.
+```bash
+export LD_LIBRARY_PATH="$MLIR_PREFIX/lib:$LD_LIBRARY_PATH"
 
----
-
-## Role in the Overall Pipeline
-
-This exercise represents the **semantic optimization peak** of the
-pipeline:
-
-- Exercises 01–03 establish lowering and raising boundaries
-- Exercises 04–05 manage scheduling vs semantics
-- This pass performs high-value **semantic fusion**
-- Later stages can lower or vectorize the fused operation
+./build/06-linalg-fusion/fuse-matmul-producers \
+  --fuse-matmul-producers \
+  06-linalg-fusion/input/matmul_with_bias.mlir
+```
 
 ---
 
-## Why This Exercise Matters
+## Role in the Pipeline
 
-This experiment demonstrates a core compiler capability:
-
-> **Producer–consumer fusion at the tensor IR level**
-
-It is foundational for:
-- performance-critical ML kernels
-- reducing memory bandwidth pressure
-- building efficient backend code generators
-
----
-
-## Next
-
-This setup naturally extends to:
-
-- fusing activation functions (ReLU, GELU)
-- multi-op fusion chains
-- vectorization and lowering to hardware backends
+| Exercise | Technique |
+|---|---|
+| 05 | Raise tiled SCF → `linalg.matmul` |
+| **06 (this)** | Fuse matmul + epilogue → single `linalg.generic` |
+| 07 | Bufferize tensors → memrefs |

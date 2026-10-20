@@ -188,15 +188,13 @@ The pass discriminates tile loops from point loops by constant step size
 
 ---
 
-### 06 – Linalg Fusion *(custom pass is a stub — WIP)*
-Fuse a bias-add operation into `linalg.matmul` at the Linalg level,
-producing a single fused operation suitable for vectorization and backend
-lowering.
+### 06 – Linalg Fusion
+Fuse a `linalg.matmul` and a parallel epilogue (`linalg.generic` bias-add)
+into a single `linalg.generic` by expanding the epilogue's 2D iteration
+space to match the matmul's 3D space and inlining both bodies.
 
-This exercise focuses purely on **producer–consumer fusion** in structured
-IR. The custom pass is a work in progress; the equivalent transformation
-can be run today with `--linalg-fuse-elementwise-ops` (see the exercise
-README).
+This exercise demonstrates **producer–consumer fusion** in structured IR:
+eliminating the intermediate buffer write-read between two adjacent ops.
 
 ---
 
