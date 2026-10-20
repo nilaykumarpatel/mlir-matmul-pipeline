@@ -177,12 +177,14 @@ This stage encodes **scheduling decisions explicitly** in the IR.
 ---
 
 ### 05 – Raise Tiled SCF to `linalg.matmul`
-Recover high-level `linalg.matmul` semantics from **already tiled SCF
-loops**, while preserving the existing scheduling structure.
+Recover `linalg.matmul` from a **6-level tiled SCF loop nest** (3 outer
+tile loops + 3 inner point loops), replacing only the inner point loops
+while leaving the outer tile loops intact.
 
-This exercise demonstrates the separation of:
-- **Scheduling** (outer SCF tile loops — kept)
-- **Computation semantics** (inner point loops → `linalg.matmul`)
+The pass discriminates tile loops from point loops by constant step size
+(> 1 vs = 1). This exercise demonstrates the core MLIR scheduling principle:
+- **Scheduling** lives in the outer SCF tile loops — preserved
+- **Computation semantics** live in the inner loops — lifted to `linalg.matmul`
 
 ---
 

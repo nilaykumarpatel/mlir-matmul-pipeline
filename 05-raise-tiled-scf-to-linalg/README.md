@@ -1,212 +1,130 @@
-# 05 – Raising Tiled SCF MatMul to Linalg
+# 05 – Raising Tiled SCF MatMul to `linalg.matmul`
 
-This experiment demonstrates **semantic lifting** in MLIR: converting a
-tiled SCF-based matmul loop nest into a structured `linalg.matmul`, while
-**preserving the existing tiling (scheduling)**.
+This exercise lifts a **6-level tiled SCF loop nest** into a structured
+`linalg.matmul` while keeping the outer tile loops intact.
 
-Unlike earlier raising steps, this pass operates on **already-tiled**
-loops and intentionally keeps the scheduling decisions encoded in SCF,
-lifting only the computation semantics.
-
----
-
-## Motivation
-
-After applying loop tiling (Exercise 04), the program contains:
-
-- explicit tile loops encoding scheduling decisions
-- inner scalar loops encoding matmul semantics
-- correct but verbose low-level IR
-
-At this stage, the compiler has *good scheduling* but **poor semantic
-representation**.
-
-This experiment demonstrates how to:
-- preserve scheduling decisions already made
-- recover high-level semantics using Linalg
-- enable structured optimizations such as fusion and vectorization
-
-This separation—**SCF for scheduling, Linalg for semantics**—is a core
-design pattern in MLIR-based compilers.
-
----
-
-## Goal
-
-Starting from tiled SCF loops, this pass (when complete) will:
-
-- Detect matmul-shaped inner loop nests
-- Replace scalar computation with `linalg.matmul`
-- Preserve outer tiling loops unchanged
-
-> **Status — WIP:** The current implementation is a stub. It applies the
-> same placeholder `linalg.generic` pattern as Exercise 02 and does **not**
-> yet emit `linalg.matmul`. The intended output IR is in
-> `output/tiled_linalg_matmul.mlir` for reference.
+The key principle: after tiling, scheduling decisions live in the outer SCF
+loops. The inner point loops are just noise — they encode matmul semantics
+that Linalg can express more cleanly. This pass peels off the noise.
 
 ---
 
 ## Input IR
 
-The input is a **tiled SCF matmul**, typically produced by running
-`--tile-matmul-loops` on a naïve SCF matmul.
-
-Representative shape:
+Exercise 04 tiles a flat 3-level SCF matmul into 6 levels: 3 outer **tile
+loops** (step = 32) and 3 inner **point loops** (step = 1):
 
 ```mlir
-scf.for ii = 0 to N step TS {
-  scf.for jj = 0 to N step TS {
-    scf.for kk = 0 to N step TS {
-      scf.for i = ii to min(ii + TS, N) {
-        scf.for j = jj to min(jj + TS, N) {
-          scf.for k = kk to min(kk + TS, N) {
-            %a = memref.load %A[%i, %k]
-            %b = memref.load %B[%k, %j]
-            %c = memref.load %C[%i, %j]
-            %d = arith.mulf %a, %b
-            %e = arith.addf %c, %d
-            memref.store %e, %C[%i, %j]
-          }
-        }
-      }
-    }
-  }
-}
+func.func @matmul(%A: memref<128x128xf32>, %B: memref<128x128xf32>,
+                  %C: memref<128x128xf32>) {
+  scf.for %ii = 0 to 128 step 32 {          // tile i
+    scf.for %jj = 0 to 128 step 32 {        // tile j
+      scf.for %kk = 0 to 128 step 32 {      // tile k
+        scf.for %i = %ii to min(%ii+32,128) step 1 {   // point i
+          scf.for %j = %jj to min(%jj+32,128) step 1 { // point j
+            scf.for %k = %kk to min(%kk+32,128) step 1 { // point k
+              %a = memref.load %A[%i, %k]
+              %b = memref.load %B[%k, %j]
+              %c = memref.load %C[%i, %j]
+              %p = arith.mulf %a, %b
+              %s = arith.addf %c, %p
+              memref.store %s, %C[%i, %j]
+            }}}}}}}
 ```
 
 ---
 
-## Transformation Performed (Current Stub)
+## Transformation
 
-The current implementation applies the same pattern as Exercise 02:
+The pass recognises the 6-level structure by checking step sizes:
+- **Tile loops** — constant step > 1 (e.g. 32)
+- **Point loops** — constant step = 1
 
-1. **Loop detection**
-   - Finds a two-level `outer → middle` SCF nest where `middle`'s body
-     contains a child `scf.for` (reduction) and a `memref.store`
+It replaces only the **3 inner point loops** (and the dead `arith.minui`
+bounds arithmetic) with `linalg.matmul`. The 3 outer tile loops are
+preserved unchanged.
 
-2. **Placeholder replacement**
-   - Replaces the matched outer loop with a 1-iterator `linalg.generic`
-     (parallel, identity map) — a structural placeholder, not a semantic
-     matmul
-
-3. **Cleanup**
-   - Erases the original loop nest
-
-> The intended transformation (tiled-loop detection + `linalg.matmul`
-> emission with scheduling preservation) is not yet implemented.
+```
+scf.for tile-i step 32 {
+  scf.for tile-j step 32 {
+    scf.for tile-k step 32 {
+      [3 point loops + scalar loads/mul/add/store]  →  linalg.matmul ins(%A,%B) outs(%C)
+    }
+  }
+}
+```
 
 ---
 
 ## Resulting IR
 
-### Current (stub) output
-
-The pass currently emits a placeholder `linalg.generic`, identical in
-structure to Exercise 02's output:
-
 ```mlir
-linalg.generic
-  { indexing_maps = [affine_map<(d0) -> (d0)>],
-    iterator_types = ["parallel"] }
-  outs(%C : memref<?xf32>) {
-^bb0(%out: f32):
-  linalg.yield %zero : f32
-}
-```
-
-### Intended output (in `output/tiled_linalg_matmul.mlir`)
-
-```mlir
-scf.for ii = 0 to 128 step 32 {
-  scf.for jj = 0 to 128 step 32 {
-    scf.for kk = 0 to 128 step 32 {
-      linalg.matmul
-        ins(%A, %B : memref<128x128xf32>, memref<128x128xf32>)
-        outs(%C : memref<128x128xf32>)
+module {
+  func.func @matmul(%arg0: memref<128x128xf32>, %arg1: memref<128x128xf32>,
+                    %arg2: memref<128x128xf32>) {
+    %c0   = arith.constant 0   : index
+    %c128 = arith.constant 128 : index
+    %c32  = arith.constant 32  : index
+    scf.for %arg3 = %c0 to %c128 step %c32 {
+      scf.for %arg4 = %c0 to %c128 step %c32 {
+        scf.for %arg5 = %c0 to %c128 step %c32 {
+          linalg.matmul ins(%arg0, %arg1 : memref<128x128xf32>, memref<128x128xf32>)
+                        outs(%arg2 : memref<128x128xf32>)
+        }
+      }
     }
+    return
   }
 }
 ```
 
-**Key property of the intended output:**
-- Scheduling is expressed in `scf.for`
-- Computation semantics are expressed in Linalg
+**What to notice:**
+- The tile loops remain — scheduling is preserved.
+- The named op `linalg.matmul` expresses *what* is computed; `scf.for` expresses *when*.
+- `linalg.matmul` (vs `linalg.generic`) is used here because the pattern is unambiguous and named ops unlock further structured transforms (fusion, tiling at the Linalg level, vectorization).
 
 ---
 
-## Pass Implementation
+## Why `linalg.matmul` and not `linalg.generic`?
 
-The pass is implemented in `pass/RaiseMatMulToLinalg.cpp` as an
-**out-of-tree** MLIR pass, built against a prebuilt MLIR installation.
+Exercise 02 targets `linalg.generic` because the input comes from Clang
+with flat 1-D memrefs and no structural guarantees — the best we can claim
+is "this looks like a generic 3-iterator op."
 
----
-
-## Building
-
-From the repo root:
-
-```bash
-MLIR_PREFIX=/path/to/llvm-install ./build.sh
-```
+Here the input has 2-D memrefs and a clear tile structure. The pattern
+match is unambiguous, so we can emit the stronger, named `linalg.matmul`.
+Named ops carry more semantics and are recognised by more downstream passes
+(e.g. `--linalg-fuse-elementwise-ops` in Exercise 06).
 
 ---
 
 ## Running the Pass
 
-> All commands below assume the **repo root** as the working directory.
+> Run from the **repo root**.
 
 ```bash
 export LD_LIBRARY_PATH="$MLIR_PREFIX/lib:$LD_LIBRARY_PATH"
-```
 
-### Full Pipeline (Exercise 04 → Exercise 05)
-
-```bash
-./build/04-loop-tiling/tile-matmul-loops \
-  --tile-matmul-loops \
-  04-loop-tiling/input/matmul_loops.mlir | \
-./build/05-raise-tiled-scf-to-linalg/raise-tiled-scf-to-linalg \
-  --raise-tiled-scf-to-linalg
-```
-
-### Run Only Exercise 05 (Already Tiled Input)
-
-```bash
+# Using the pre-tiled input directly
 ./build/05-raise-tiled-scf-to-linalg/raise-tiled-scf-to-linalg \
   --raise-tiled-scf-to-linalg \
   05-raise-tiled-scf-to-linalg/input/tiled_matmul_scf.mlir
+
+# Or chain Ex04 → Ex05 via a temp file
+./build/04-loop-tiling/tile-matmul-loops \
+  --tile-matmul-loops \
+  04-loop-tiling/input/matmul_loops.mlir \
+  -o /tmp/tiled.mlir 2>/dev/null && \
+./build/05-raise-tiled-scf-to-linalg/raise-tiled-scf-to-linalg \
+  --raise-tiled-scf-to-linalg /tmp/tiled.mlir
 ```
 
 ---
 
-## Assumptions and Non-Goals
+## Role in the Pipeline
 
-- Assumes a canonical tiled SCF matmul structure
-- Does not change tile sizes or scheduling
-- Does not perform fusion or vectorization
-- Focuses solely on semantic lifting
-
-These constraints keep the pass narrowly focused and predictable.
-
----
-
-## Role in the Overall Pipeline
-
-This pass reconnects **low-level scheduling decisions** with
-**high-level semantic structure**:
-
-- Exercise 04 decides *how* computation is scheduled
-- This pass recovers *what* computation is being performed
-- Exercise 06 builds on this to perform structured fusion
-
----
-
-## Why This Exercise Matters
-
-This experiment demonstrates a critical compiler design principle:
-
-> **Scheduling decisions should be explicit and preserved, while
-> computation semantics should remain high-level and structured.**
-
-This separation is essential for building flexible and maintainable
-compiler pipelines.
+| Exercise | Technique | Direction |
+|---|---|---|
+| 04 | Loop tiling | SCF → tiled SCF |
+| **05 (this)** | Semantic lifting | tiled SCF → tiled SCF + `linalg.matmul` |
+| 06 | Linalg fusion | `linalg.matmul` + bias → fused generic |
