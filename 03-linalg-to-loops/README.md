@@ -1,11 +1,33 @@
 # 03 – Lowering `linalg.matmul` to Explicit Loop Nests
 
-This experiment demonstrates how a **tensor-semantic `linalg.matmul`**
-operation is lowered into **explicit executable loop nests** using
-standard MLIR bufferization and lowering passes.
+This exercise goes in the **opposite direction from Exercise 02**. Ex 02
+raised SCF loops *up* to `linalg.generic`. This exercise lowers
+`linalg.matmul` *down* to SCF loops — exposing the explicit execution
+structure on which loop-level optimizations like tiling (Ex 04) operate.
 
-The goal here is **not tiling or scheduling**, but to expose the
-**concrete execution structure** on which such optimizations operate.
+---
+
+## `linalg.matmul` vs `linalg.generic`
+
+Both are structured Linalg ops, but at different levels of specificity:
+
+| | `linalg.matmul` | `linalg.generic` |
+|---|---|---|
+| Kind | Named op | Anonymous op |
+| Semantics | Fixed: C += A × B | User-defined body + indexing maps |
+| Indexing maps | Implicit (always matmul) | Explicit in IR |
+| Downstream passes | Recognised by name (fusion, tiling) | Pattern-matched via maps |
+
+`linalg.matmul` is the stronger claim: the compiler knows *exactly* what
+computation this is. `linalg.generic` is more flexible but requires the
+compiler to inspect the body to understand the computation.
+
+Ex 02 targets `linalg.generic` because the Clang input gives no structural
+guarantees. Ex 05 targets `linalg.matmul` because the tiled 2-D input is
+unambiguous. Ex 03 starts from `linalg.matmul` and lowers it all the way
+to loops.
+
+---
 
 ---
 
@@ -123,14 +145,20 @@ IR and explicit control flow.
 
 ---
 
-## Role in the Overall Pipeline
+## Role in Arc 1 (SCF ↔ Linalg round-trip)
 
-This exercise represents the **lowering boundary** in the pipeline:
+| Exercise | Direction | Technique |
+|---|---|---|
+| 02 | raise | SCF loops → `linalg.generic` |
+| **03 (this)** | lower | `linalg.matmul` → SCF loops |
+| 04 | schedule | SCF loops → tiled SCF |
+| 05 | raise | tiled SCF → `linalg.matmul` |
 
-- Exercises 01–02 operate at higher abstraction levels
-- This step exposes explicit loops and memory accesses
-- Exercise 04 performs custom loop tiling on this representation
-- Later stages recover structure or apply fusion as needed
+Exercises 03 and 04 together produce the tiled SCF input that Ex 05
+then re-raises to `linalg.matmul`. This is the long way around — in
+a real compiler, tiling is applied directly on the `linalg.matmul`
+(skipping 03 and 04). These exercises isolate the lowering and tiling
+techniques for study.
 
 ---
 
