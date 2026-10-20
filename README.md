@@ -1,7 +1,7 @@
 # MLIR Compiler Experiments: From SCF Loops to Vectorized Linalg
 
 This repository is a **hands-on MLIR compiler learning project** covering
-nine core **middle-end transformation techniques** for matrix multiplication.
+eight core **middle-end transformation techniques** for matrix multiplication.
 
 Each exercise is **mostly self-contained**: it has its own input MLIR and
 teaches one transformation in isolation. Most exercises use independently
@@ -9,9 +9,8 @@ crafted inputs; the exception is Ex04→Ex05, which is a deliberate two-step
 sequence where Ex04's tiled output is the input to Ex05.
 
 Taken together they cover the full vocabulary of mid-level transformations:
-**detect, raise, lower, tile, re-raise, fuse, bufferize, vectorize, and map to GPU**,
-using core MLIR dialects: **SCF**, **Linalg**, **MemRef**, **Affine**, **Vector**,
-and **GPU**.
+**detect, raise, lower, tile, re-raise, fuse, bufferize, and vectorize**,
+using core MLIR dialects: **SCF**, **Linalg**, **MemRef**, **Affine**, and **Vector**.
 
 The goal is a deep understanding of **mid-level compiler transformations** —
 the layer where most ML compiler complexity actually lives.
@@ -29,7 +28,6 @@ the layer where most ML compiler complexity actually lives.
 06-linalg-fusion/
 07-bufferization/
 08-linalg-to-vector/
-09-linalg-to-gpu/
 tools/
 CMakeLists.txt
 build.sh
@@ -123,11 +121,11 @@ Redirect to `/dev/null` to suppress IR output and see only pass diagnostics:
   -o /dev/null
 ```
 
-Exercises 03, 06, 08, and 09 use standard `mlir-opt` passes and do not have
+Exercises 03, 06, and 08 use standard `mlir-opt` passes and do not have
 custom binaries. Use the `mlir-opt` from your MLIR installation directly:
 
 ```bash
-# Example: exercises 03, 06, 08, 09 — see each README for the exact pipeline
+# Example: exercises 03, 06, 08 — see each README for the exact pipeline
 "$MLIR_PREFIX/bin/mlir-opt" --help
 ```
 
@@ -227,20 +225,7 @@ This exercise:
 - Exposes how parallel dimensions are vectorized while reduction
   dimensions remain scalar
 
----
-
-### 09 – GPU Dialect Lowering
-Map the vectorized affine loop nests from Exercise 08 onto GPU block
-dimensions, producing host/device split IR in MLIR's GPU dialect.
-
-This exercise:
-- Maps the two outer parallel `affine.for` loops to a 2D GPU block grid
-- Outlines the kernel body into a `gpu.module` with a `gpu.func`
-- Replaces loop induction variables with `gpu.block_id x/y`
-- Leaves the reduction loop and vector ops inside the kernel
-
-This is the **first step of GPU lowering** — the boundary where the
-middle-end ends and the GPU backend begins.
+This is the **final middle-end stage** before backend-specific lowering.
 
 ---
 
@@ -265,19 +250,18 @@ SCF Loops (Clang-emitted, flat memref)
 > structured level (skipping 03–04), producing the same tiled-linalg IR
 > that 05 targets. Exercises 03 and 04 isolate those techniques for study.
 
-**Arc 2 — Structured Linalg to hardware (exercises 06–09)**
+**Arc 2 — Structured Linalg to hardware (exercises 06–08)**
 
 ```
 linalg.matmul  +  elementwise bias
   ↓  06  fuse producer into matmul             [producer–consumer fusion]
   ↓  07  bufferize tensors → memrefs           [memory semantics]
   ↓  08  vectorize → Vector dialect (SIMD)     [target-independent codegen]
-  ↓  09  map to GPU block grid                 [GPU dialect lowering]
 ```
 
 These two arcs together cover the full middle-end of a real ML compiler
-pipeline — from frontend IR through structured transformations to the
-boundary where GPU backend lowering begins.
+pipeline (CPUs, GPUs, TPUs, custom accelerators) — from frontend IR to
+the boundary of hardware-specific lowering.
 
 ---
 
